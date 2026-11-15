@@ -66,6 +66,13 @@
     min-width: 58px;
   }
 
+  .panel { max-width: 420px; margin: 18px auto; padding: 18px; background: #223149; border-radius: 12px; }
+  .panel input { padding: 12px; border-radius: 8px; border: 1px solid #64748b; font-size: 16px; width: min(85%, 280px); box-sizing: border-box; }
+  .panel h2 { margin-top: 0; }
+  .leaderboard { width: 100%; border-collapse: collapse; text-align: left; }
+  .leaderboard th, .leaderboard td { padding: 8px; border-bottom: 1px solid #475569; }
+  .leaderboard td:last-child, .leaderboard th:last-child { text-align: right; }
+  .hidden { display: none; }
   #status {
     margin: 12px;
     color: #facc15;
@@ -87,9 +94,28 @@
 
 <canvas id="board" width="240" height="480"></canvas>
 
-<div id="status">Stiskni Start</div>
+<div id="status">Zadej jméno a spusť hru</div>
 
-<button id="start">Start / Znovu</button>
+<div id="welcome" class="panel">
+  <h2>Nová hra</h2>
+  <label for="playerName">Jméno hráče</label>
+  <p><input id="playerName" maxlength="24" autocomplete="nickname" placeholder="Tvoje jméno"></p>
+  <button id="play">Spustit hru</button>
+</div>
+
+<div id="gameOver" class="panel hidden" aria-live="polite">
+  <h2>Konec hry!</h2>
+  <p id="finalScore"></p>
+  <p id="rankMessage"></p>
+  <button id="again">Hrát znovu</button>
+</div>
+
+<div id="ranking" class="panel hidden">
+  <h2>🏆 TOP 10</h2>
+  <table class="leaderboard"><thead><tr><th>Pořadí</th><th>Hráč</th><th>Body</th></tr></thead><tbody id="rankingBody"></tbody></table>
+</div>
+
+<button id="start" class="hidden">Start / Znovu</button>
 <button id="pause">Pauza</button>
 
 <div class="controls">
@@ -175,6 +201,49 @@ let paused = false;
 let last = 0;
 let fall = 0;
 let raf = 0;
+let playerName = '';
+const rankingKey = 'tetris-plus-top10-v1';
+
+function getRanking() {
+  try {
+    const data = JSON.parse(localStorage.getItem(rankingKey) || '[]');
+    return Array.isArray(data) ? data.filter(x => typeof x.name === 'string' && Number.isFinite(x.score)).slice(0, 10) : [];
+  } catch { return []; }
+}
+
+function showRanking() {
+  const body = $('rankingBody');
+  body.replaceChildren();
+  getRanking().forEach((entry, i) => {
+    const tr = document.createElement('tr');
+    [String(i + 1) + '.', entry.name, String(entry.score)].forEach(value => {
+      const td = document.createElement('td');
+      td.textContent = value;
+      tr.appendChild(td);
+    });
+    body.appendChild(tr);
+  });
+  $('ranking').classList.remove('hidden');
+}
+
+function finishGame() {
+  if (!running) return;
+  running = false;
+  cancelAnimationFrame(raf);
+  $('status').textContent = 'Konec hry!';
+  const results = getRanking();
+  const entry = {name: playerName, score};
+  results.push(entry);
+  results.sort((a, b) => b.score - a.score);
+  const rank = results.indexOf(entry) + 1;
+  const top = results.slice(0, 10);
+  try { localStorage.setItem(rankingKey, JSON.stringify(top)); } catch {}
+  $('finalScore').textContent = playerName + ', tvoje skóre: ' + score + ' bodů.';
+  $('rankMessage').textContent = rank <= 10 ? 'Gratulujeme! Umístění v TOP 10: ' + rank + '. místo.' : 'Tentokrát to na TOP 10 nestačilo.';
+  $('gameOver').classList.remove('hidden');
+  showRanking();
+}
+
 
 const $ = id => document.getElementById(id);
 
@@ -209,8 +278,7 @@ function spawn() {
   };
 
   if (collides(piece.x, piece.y, m)) {
-    running = false;
-    $('status').textContent = 'Konec hry!';
+    finishGame();
   }
 }
 
@@ -450,7 +518,13 @@ function tick(t) {
 
 // TLAČÍTKO START
 
-$('start').onclick = () => {
+function startGame() {
+  const name = $('playerName').value.trim();
+  if (!name) { $('playerName').focus(); $('status').textContent = 'Nejdřív vyplň jméno hráče.'; return; }
+  playerName = name;
+  $('welcome').classList.add('hidden');
+  $('gameOver').classList.add('hidden');
+  $('ranking').classList.add('hidden');
   cancelAnimationFrame(raf);
 
   reset();
@@ -462,8 +536,11 @@ $('start').onclick = () => {
   $('status').textContent = 'Hraješ!';
 
   raf = requestAnimationFrame(tick);
-};
-
+}
+$('play').onclick = startGame;
+$('again').onclick = () => { $('gameOver').classList.add('hidden'); $('welcome').classList.remove('hidden'); $('playerName').focus(); };
+$('playerName').addEventListener('keydown', e => { if (e.key === 'Enter') startGame(); });
+$('start').onclick = startGame;
 
 // TLAČÍTKO PAUZA
 
@@ -501,6 +578,7 @@ document.addEventListener('keydown', e => {
     action(map[e.key]);
   }
 
+  if (e.target instanceof HTMLInputElement) return;
   if (e.key.toLowerCase() === 'p') {
     $('pause').click();
   }
@@ -511,6 +589,7 @@ document.addEventListener('keydown', e => {
 
 reset();
 draw();
+showRanking();
 
 </script>
 
