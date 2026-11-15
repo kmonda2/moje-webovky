@@ -1,0 +1,518 @@
+
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tetris+</title>
+
+<style>
+  body {
+    margin: 0;
+    background: #101827;
+    color: white;
+    font-family: Arial, sans-serif;
+    text-align: center;
+    padding: 24px 12px;
+  }
+
+  h1 {
+    margin: 8px 0;
+  }
+
+  p {
+    color: #bac8da;
+  }
+
+  .stats {
+    display: flex;
+    gap: 12px;
+    justify-content: center;
+    flex-wrap: wrap;
+    margin: 16px;
+  }
+
+  .stats span {
+    background: #223149;
+    padding: 10px;
+    border-radius: 9px;
+  }
+
+  canvas {
+    display: block;
+    margin: auto;
+    background: #0b1020;
+    border: 2px solid #64748b;
+    border-radius: 6px;
+    max-width: 95vw;
+    height: auto;
+  }
+
+  button {
+    background: #38bdf8;
+    color: #071322;
+    border: 0;
+    border-radius: 9px;
+    padding: 12px 18px;
+    margin: 5px;
+    cursor: pointer;
+    font-weight: bold;
+    font-size: 16px;
+  }
+
+  .controls button {
+    background: #334155;
+    color: white;
+    min-width: 58px;
+  }
+
+  #status {
+    margin: 12px;
+    color: #facc15;
+  }
+</style>
+</head>
+
+<body>
+
+<h1>🎮 Tetris+</h1>
+<p>13 obrazců, více bodů a každou minutu vyšší rychlost!</p>
+
+<div class="stats">
+  <span>Skóre: <b id="score">0</b></span>
+  <span>Řádky: <b id="lines">0</b></span>
+  <span>Čas: <b id="time">0:00</b></span>
+  <span>Úroveň: <b id="level">1</b></span>
+</div>
+
+<canvas id="board" width="240" height="480"></canvas>
+
+<div id="status">Stiskni Start</div>
+
+<button id="start">Start / Znovu</button>
+<button id="pause">Pauza</button>
+
+<div class="controls">
+  <div>
+    <button data-action="rotate">↻ Otočit</button>
+  </div>
+  <div>
+    <button data-action="left">←</button>
+    <button data-action="down">↓</button>
+    <button data-action="right">→</button>
+  </div>
+  <button data-action="hard">Rychlý pád</button>
+</div>
+
+<p>
+  Ovládání: ← → pohyb, ↑ otočení,
+  ↓ rychlejší pád, mezerník okamžitý pád,
+  P pauza.
+</p>
+
+<script>
+
+// ROZMĚRY HERNÍ PLOCHY
+
+const canvas = document.getElementById('board');
+const ctx = canvas.getContext('2d');
+
+const W = 10;
+const H = 20;
+const S = 24;
+
+
+// TVARY OBRAZCŮ
+
+const shapes = [
+  [[1,1,1,1]],
+  [[1,1],[1,1]],
+  [[0,1,0],[1,1,1]],
+  [[1,0,0],[1,1,1]],
+  [[0,0,1],[1,1,1]],
+  [[0,1,1],[1,1,0]],
+  [[1,1,0],[0,1,1]],
+  [[1,1,1,1,1]],
+  [[1,0,1],[1,1,1]],
+  [[0,1,0],[1,1,1],[0,1,0]],
+  [[1,0],[1,0],[1,1]],
+  [[1,1,1],[1,0,1]],
+  [[1,1,0],[0,1,1],[0,0,1]]
+];
+
+
+// BARVY OBRAZCŮ
+
+const colors = [
+  '#22d3ee',
+  '#facc15',
+  '#a78bfa',
+  '#fb923c',
+  '#60a5fa',
+  '#4ade80',
+  '#f87171',
+  '#f472b6',
+  '#2dd4bf',
+  '#c084fc',
+  '#fbbf24',
+  '#818cf8',
+  '#fb7185'
+];
+
+
+// PROMĚNNÉ HRY
+
+let board;
+let piece;
+
+let score = 0;
+let lines = 0;
+let elapsed = 0;
+
+let running = false;
+let paused = false;
+
+let last = 0;
+let fall = 0;
+let raf = 0;
+
+const $ = id => document.getElementById(id);
+
+
+// KONTROLA KOLIZÍ
+
+function collides(x, y, m) {
+  return m.some((row, dy) =>
+    row.some((v, dx) =>
+      v && (
+        x + dx < 0 ||
+        x + dx >= W ||
+        y + dy >= H ||
+        (y + dy >= 0 && board[y + dy][x + dx])
+      )
+    )
+  );
+}
+
+
+// VYTVOŘENÍ NOVÉHO OBRAZCE
+
+function spawn() {
+  const id = Math.floor(Math.random() * shapes.length);
+  const m = shapes[id].map(row => row.slice());
+
+  piece = {
+    m: m,
+    x: Math.floor((W - m[0].length) / 2),
+    y: 0,
+    c: id + 1
+  };
+
+  if (collides(piece.x, piece.y, m)) {
+    running = false;
+    $('status').textContent = 'Konec hry!';
+  }
+}
+
+
+// NOVÁ HRA
+
+function reset() {
+  board = Array.from(
+    {length: H},
+    () => Array(W).fill(0)
+  );
+
+  score = 0;
+  lines = 0;
+  elapsed = 0;
+  fall = 0;
+
+  spawn();
+  update();
+}
+
+
+// AKTUALIZACE SKÓRE A ČASU
+
+function update() {
+  $('score').textContent = score;
+  $('lines').textContent = lines;
+
+  $('level').textContent =
+    1 + Math.floor(elapsed / 60000);
+
+  const secs = Math.floor(elapsed / 1000);
+
+  $('time').textContent =
+    Math.floor(secs / 60) + ':' +
+    String(secs % 60).padStart(2, '0');
+}
+
+
+// ULOŽENÍ OBRAZCE A MAZÁNÍ ŘÁDKŮ
+
+function merge() {
+  piece.m.forEach((row, dy) =>
+    row.forEach((v, dx) => {
+      if (v && piece.y + dy >= 0) {
+        board[piece.y + dy][piece.x + dx] = piece.c;
+      }
+    })
+  );
+
+  let count = 0;
+
+  for (let y = H - 1; y >= 0; y--) {
+    if (board[y].every(Boolean)) {
+      board.splice(y, 1);
+      board.unshift(Array(W).fill(0));
+      count++;
+      y++;
+    }
+  }
+
+  if (count > 0) {
+    lines += count;
+
+    // Body za odstraněné řádky
+    score += count * count * 100;
+
+    update();
+  }
+
+  spawn();
+}
+
+
+// AUTOMATICKÝ PÁD
+
+function drop() {
+  if (!collides(piece.x, piece.y + 1, piece.m)) {
+    piece.y++;
+  } else {
+    merge();
+  }
+}
+
+
+// OTÁČENÍ OBRAZCŮ
+
+function rotate() {
+  const m = piece.m[0].map((_, i) =>
+    piece.m.map(row => row[i]).reverse()
+  );
+
+  for (const dx of [0, -1, 1, -2, 2, -3, 3]) {
+    if (!collides(piece.x + dx, piece.y, m)) {
+      piece.x += dx;
+      piece.m = m;
+      break;
+    }
+  }
+}
+
+
+// OVLÁDÁNÍ A BODOVÁNÍ
+
+function action(a) {
+  if (!running || paused) return;
+
+  if (a === 'left' &&
+      !collides(piece.x - 1, piece.y, piece.m)) {
+    piece.x--;
+  }
+
+  if (a === 'right' &&
+      !collides(piece.x + 1, piece.y, piece.m)) {
+    piece.x++;
+  }
+
+  if (a === 'rotate') {
+    rotate();
+  }
+
+  // ŠIPKA DOLŮ = 1 BOD
+  if (a === 'down') {
+    drop();
+    score++;
+    update();
+  }
+
+  // MEZERNÍK = 2 BODY ZA KAŽDÉ POLÍČKO
+  if (a === 'hard') {
+    let steps = 0;
+
+    while (!collides(piece.x, piece.y + 1, piece.m)) {
+      piece.y++;
+      steps++;
+    }
+
+    score += steps * 2;
+
+    merge();
+    update();
+  }
+
+  draw();
+}
+
+
+// VYKRESLENÍ JEDNOHO POLÍČKA
+
+function drawCell(x, y, c) {
+  ctx.fillStyle = colors[c - 1];
+  ctx.fillRect(x*S+1, y*S+1, S-2, S-2);
+
+  ctx.fillStyle = 'rgba(255,255,255,.22)';
+  ctx.fillRect(x*S+2, y*S+2, S-4, 4);
+}
+
+
+// VYKRESLENÍ HERNÍ PLOCHY
+
+function draw() {
+  ctx.fillStyle = '#0b1020';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  ctx.strokeStyle = '#1e293b';
+
+  for (let x = 0; x <= W; x++) {
+    ctx.beginPath();
+    ctx.moveTo(x*S, 0);
+    ctx.lineTo(x*S, H*S);
+    ctx.stroke();
+  }
+
+  for (let y = 0; y <= H; y++) {
+    ctx.beginPath();
+    ctx.moveTo(0, y*S);
+    ctx.lineTo(W*S, y*S);
+    ctx.stroke();
+  }
+
+  board.forEach((row, y) =>
+    row.forEach((c, x) => {
+      if (c) drawCell(x, y, c);
+    })
+  );
+
+  if (piece) {
+    piece.m.forEach((row, dy) =>
+      row.forEach((v, dx) => {
+        if (v && piece.y + dy >= 0) {
+          drawCell(
+            piece.x + dx,
+            piece.y + dy,
+            piece.c
+          );
+        }
+      })
+    );
+  }
+}
+
+
+// HERNÍ SMYČKA A ZRYCHLOVÁNÍ
+
+function tick(t) {
+  if (!running) {
+    draw();
+    return;
+  }
+
+  const dt = Math.min(100, t - last);
+  last = t;
+
+  if (!paused) {
+    elapsed += dt;
+    fall += dt;
+
+    // KAŽDOU MINUTU ZRYCHLENÍ O 5 %
+    const interval =
+      700 * Math.pow(
+        0.95,
+        Math.floor(elapsed / 60000)
+      );
+
+    if (fall >= interval) {
+      drop();
+      fall = 0;
+    }
+
+    update();
+  }
+
+  draw();
+  raf = requestAnimationFrame(tick);
+}
+
+
+// TLAČÍTKO START
+
+$('start').onclick = () => {
+  cancelAnimationFrame(raf);
+
+  reset();
+
+  running = true;
+  paused = false;
+  last = performance.now();
+
+  $('status').textContent = 'Hraješ!';
+
+  raf = requestAnimationFrame(tick);
+};
+
+
+// TLAČÍTKO PAUZA
+
+$('pause').onclick = () => {
+  if (!running) return;
+
+  paused = !paused;
+  last = performance.now();
+
+  $('status').textContent =
+    paused ? 'Pozastaveno' : 'Hraješ!';
+};
+
+
+// TLAČÍTKA OVLÁDÁNÍ
+
+document.querySelectorAll('[data-action]').forEach(
+  b => b.onclick = () => action(b.dataset.action)
+);
+
+
+// OVLÁDÁNÍ KLÁVESNICÍ
+
+document.addEventListener('keydown', e => {
+  const map = {
+    ArrowLeft: 'left',
+    ArrowRight: 'right',
+    ArrowDown: 'down',
+    ArrowUp: 'rotate',
+    ' ': 'hard'
+  };
+
+  if (map[e.key] && running) {
+    e.preventDefault();
+    action(map[e.key]);
+  }
+
+  if (e.key.toLowerCase() === 'p') {
+    $('pause').click();
+  }
+});
+
+
+// PRVNÍ VYKRESLENÍ
+
+reset();
+draw();
+
+</script>
+
+</body>
+</html>
