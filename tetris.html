@@ -73,6 +73,30 @@
   .leaderboard th, .leaderboard td { padding: 8px; border-bottom: 1px solid #475569; }
   .leaderboard td:last-child, .leaderboard th:last-child { text-align: right; }
   .hidden { display: none; }
+  .game-layout { display: flex; align-items: flex-start; justify-content: center; gap: 20px; flex-wrap: wrap; }
+  .game-main { min-width: 0; }
+  #board { touch-action: none; user-select: none; -webkit-user-select: none; }
+  .controls { touch-action: manipulation; user-select: none; -webkit-user-select: none; }
+  .controls button { touch-action: none; -webkit-tap-highlight-color: transparent; }
+  .mobile-hint { display: none; }
+  #tease { color: #facc15; font-weight: bold; font-size: 18px; }
+  @media (max-width: 600px) {
+    body { padding: 8px 8px 24px; }
+    h1 { font-size: 24px; margin: 4px 0; }
+    body > p:first-of-type { font-size: 12px; margin: 4px 0 8px; }
+    .stats { gap: 5px; margin: 8px 0; }
+    .stats span { padding: 7px 8px; font-size: 12px; }
+    #board { width: min(240px, 57vw, 27vh); height: auto; }
+    #status { margin: 6px; font-size: 14px; }
+    .controls { width: min(100%, 420px); margin: 4px auto; }
+    .controls button { min-height: 52px; min-width: 64px; margin: 3px; font-size: 19px; }
+    .controls button[data-action="hard"] { min-width: 160px; }
+    .mobile-hint { display: block; font-size: 12px; margin: 7px auto; }
+    .panel { margin: 10px auto; padding: 12px; }
+  }
+  @media (pointer: coarse) {
+    .controls button { min-height: 52px; }
+  }
   #status {
     margin: 12px;
     color: #facc15;
@@ -107,6 +131,7 @@
   <h2>Konec hry!</h2>
   <p id="finalScore"></p>
   <p id="rankMessage"></p>
+  <p id="tease"></p>
   <button id="again">Hrát znovu</button>
 </div>
 
@@ -118,7 +143,7 @@
 <button id="start" class="hidden">Start / Znovu</button>
 <button id="pause">Pauza</button>
 
-<div class="controls">
+<div class="controls" id="touchControls">
   <div>
     <button data-action="rotate">↻ Otočit</button>
   </div>
@@ -129,6 +154,7 @@
   </div>
   <button data-action="hard">Rychlý pád</button>
 </div>
+<p class="mobile-hint">Na herní ploše: táhni do stran nebo dolů, klepnutím otoč, rychlým tahem dolů pusť obrazec.</p>
 
 <p>
   Ovládání: ← → pohyb, ↑ otočení,
@@ -243,6 +269,7 @@ function finishGame() {
   const top = results.slice(0, 10);
   try { localStorage.setItem(rankingKey, JSON.stringify(top)); } catch {}
   $('finalScore').textContent = playerName + ', tvoje skóre: ' + score + ' bodů.';
+  $('tease').textContent = playerName + ' je lůzr, Kmonda měl určitě lepší výsledek... polepši se!!';
   $('rankMessage').textContent = rank <= 10 ? 'Gratulujeme! Umístění v TOP 10: ' + rank + '. místo.' : 'Tentokrát to na TOP 10 nestačilo.';
   $('gameOver').classList.remove('hidden');
   showRanking();
@@ -407,7 +434,7 @@ function action(a) {
   // ŠIPKA DOLŮ = 1 BOD
   if (a === 'down') {
     drop();
-    score++;
+    if (running) score++;
     update();
   }
 
@@ -516,7 +543,7 @@ function tick(t) {
   }
 
   draw();
-  raf = requestAnimationFrame(tick);
+  if (running) raf = requestAnimationFrame(tick);
 }
 
 
@@ -559,12 +586,75 @@ $('pause').onclick = () => {
 };
 
 
-// TLAČÍTKA OVLÁDÁNÍ
+// DOTYKOVÁ TLAČÍTKA: podržení šipek opakuje pohyb
+let holdTimeout = null;
+let holdInterval = null;
+function stopHolding() {
+  clearTimeout(holdTimeout);
+  clearInterval(holdInterval);
+  holdTimeout = null;
+  holdInterval = null;
+}
+document.querySelectorAll('[data-action]').forEach(b => {
+  const a = b.dataset.action;
+  b.addEventListener('pointerdown', e => {
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
+    e.preventDefault();
+    stopHolding();
+    action(a);
+    if (['left', 'right', 'down'].includes(a)) {
+      holdTimeout = setTimeout(() => {
+        holdInterval = setInterval(() => action(a), a === 'down' ? 55 : 95);
+      }, 230);
+    }
+  });
+  b.addEventListener('pointerup', stopHolding);
+  b.addEventListener('pointercancel', stopHolding);
+  b.addEventListener('lostpointercapture', stopHolding);
+  b.addEventListener('contextmenu', e => e.preventDefault());
+});
+window.addEventListener('blur', stopHolding);
 
-document.querySelectorAll('[data-action]').forEach(
-  b => b.onclick = () => action(b.dataset.action)
-);
-
+// GESTA NA HERNÍ PLOŠE: vodorovný tah, tah dolů, klepnutí
+let gesture = null;
+canvas.addEventListener('pointerdown', e => {
+  if (!running || paused || e.pointerType === 'mouse') return;
+  e.preventDefault();
+  gesture = {id:e.pointerId, x:e.clientX, y:e.clientY, startY:e.clientY, startX:e.clientX, moved:false};
+  canvas.setPointerCapture(e.pointerId);
+});
+canvas.addEventListener('pointermove', e => {
+  if (!gesture || gesture.id !== e.pointerId || !running || paused) return;
+  e.preventDefault();
+  const cell = canvas.getBoundingClientRect().width / W;
+  let dx = e.clientX - gesture.x;
+  let dy = e.clientY - gesture.y;
+  if (Math.abs(dx) > cell * .7 || Math.abs(dy) > cell * .7) gesture.moved = true;
+  while (Math.abs(dx) >= cell * .8) {
+    action(dx > 0 ? 'right' : 'left');
+    gesture.x += Math.sign(dx) * cell * .8;
+    dx = e.clientX - gesture.x;
+  }
+  while (dy >= cell * .8) {
+    action('down');
+    gesture.y += cell * .8;
+    dy = e.clientY - gesture.y;
+  }
+});
+canvas.addEventListener('pointerup', e => {
+  if (!gesture || gesture.id !== e.pointerId) return;
+  e.preventDefault();
+  const g = gesture;
+  gesture = null;
+  if (!running || paused) return;
+  if (e.clientY - g.startY > canvas.getBoundingClientRect().width / W * 5 &&
+      Math.abs(e.clientX - g.startX) < canvas.getBoundingClientRect().width / W * 3) {
+    action('hard');
+  } else if (!g.moved && Math.hypot(e.clientX - g.startX, e.clientY - g.startY) < 12) {
+    action('rotate');
+  }
+});
+canvas.addEventListener('pointercancel', () => { gesture = null; });
 
 // OVLÁDÁNÍ KLÁVESNICÍ
 
@@ -577,6 +667,7 @@ document.addEventListener('keydown', e => {
     ' ': 'hard'
   };
 
+  if (e.target instanceof HTMLInputElement) return;
   if (map[e.key] && running) {
     e.preventDefault();
     action(map[e.key]);
