@@ -83,7 +83,7 @@
 <body>
 
 <h1>🎮 Tetris+</h1>
-<p>13 obrazců, více bodů a každou minutu vyšší rychlost!</p>
+<p>15 obrazců, více bodů a každou minutu vyšší rychlost!</p>
 
 <div class="stats">
   <span>Skóre: <b id="score">0</b></span>
@@ -163,7 +163,9 @@ const shapes = [
   [[0,1,0],[1,1,1],[0,1,0]],
   [[1,0],[1,0],[1,1]],
   [[1,1,1],[1,0,1]],
-  [[1,1,0],[0,1,1],[0,0,1]]
+  [[1,1,0],[0,1,1],[0,0,1]],
+  [[1]],              // Tečka
+  [[1,1]]             // Dvě tečky vedle sebe
 ];
 
 
@@ -182,7 +184,9 @@ const colors = [
   '#c084fc',
   '#fbbf24',
   '#818cf8',
-  '#fb7185'
+  '#fb7185',
+  '#f9a8d4',
+  '#86efac'
 ];
 
 
